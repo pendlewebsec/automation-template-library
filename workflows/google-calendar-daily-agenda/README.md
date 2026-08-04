@@ -24,13 +24,13 @@ It supports:
 
 ## Workflow
 
-![Workflow](workflow.png)
 
----
+<img width="1476" height="770" alt="workflow" src="https://github.com/user-attachments/assets/980e448a-0bff-406e-8e88-40c7827b08b2" />---
 
 ## Email Preview
 
-![Email Preview](email-preview.png)
+<img width="1698" height="926" alt="email-preview" src="https://github.com/user-attachments/assets/115afaef-dc4e-4916-b80c-d9405c03b0ac" />
+
 
 ---
 
