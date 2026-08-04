@@ -83,6 +83,3 @@ See **install.md** for step-by-step setup instructions.
 
 ---
 
-## License
-
-MIT
