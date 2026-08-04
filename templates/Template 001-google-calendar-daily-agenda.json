@@ -1,0 +1,317 @@
+{
+  "name": "Google Calendar Daily Agenda (HTML Email)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0734b23d-9065-4e73-8872-a66dd96c429d",
+      "name": "Daily Reminder Check"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "",
+          "mode": "id"
+        },
+        "timeMin": "={{ $today.plus({ days: 1 }).startOf('day') }}",
+        "timeMax": "={{ $today.plus({ days: 2 }).startOf('day') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "9bdcde93-5396-4bf0-a651-204052df5152",
+      "name": "Get Tomorrow's Events",
+      "alwaysOutputData": true
+    },
+      
+    {
+      "parameters": {
+        "jsCode": "// Remove the empty placeholder produced by \"Always Output Data\".\nconst inputItems = $input\n  .all()\n  .filter((item) => {\n    const event = item.json;\n\n    const hasEventData =\n      event?.id ||\n      event?.summary ||\n      event?.start;\n\n    const isNotCancelled =\n      event?.status !== 'cancelled';\n\n    return hasEventData && isNotCancelled;\n  });\n\n// Change these values later if a client prefers another format.\nconst locale = 'en-US';\n\n// Use the timezone configured in the n8n workflow settings.\n// Fall back to UTC if no workflow timezone is available.\nconst timeZone = $now.zoneName || 'UTC';\n\nfunction formatDate(dateValue) {\n  if (!dateValue) return '';\n\n  // Adding noon prevents all-day dates from shifting backward\n  // because of timezone conversion.\n  const safeDateValue = dateValue.includes('T')\n    ? dateValue\n    : `${dateValue}T12:00:00`;\n\n  const date = new Date(safeDateValue);\n\n  if (Number.isNaN(date.getTime())) {\n    return dateValue;\n  }\n\n  return new Intl.DateTimeFormat(locale, {\n    weekday: 'long',\n    month: 'long',\n    day: 'numeric',\n    year: 'numeric',\n    timeZone,\n  }).format(date);\n}\n\nfunction formatTime(dateTimeValue) {\n  if (!dateTimeValue) return '';\n\n  const date = new Date(dateTimeValue);\n\n  if (Number.isNaN(date.getTime())) {\n    return '';\n  }\n\n  return new Intl.DateTimeFormat(locale, {\n    hour: 'numeric',\n    minute: '2-digit',\n    hour12: true,\n    timeZone,\n  }).format(date);\n}\n\n// Creates a machine-friendly 24-hour value such as \"09:45\".\n// This is used only for sorting, not shown in the email.\nfunction createSortTime(dateTimeValue, allDay) {\n  if (allDay) return '00:00';\n  if (!dateTimeValue) return '23:59';\n\n  const date = new Date(dateTimeValue);\n\n  if (Number.isNaN(date.getTime())) {\n    return '23:59';\n  }\n\n  return new Intl.DateTimeFormat('en-GB', {\n    hour: '2-digit',\n    minute: '2-digit',\n    hourCycle: 'h23',\n    timeZone,\n  }).format(date);\n}\n\nconst events = inputItems.map((item) => {\n  const event = item.json;\n\n  const allDay = Boolean(event.start?.date);\n  const rawDate = event.start?.date || event.start?.dateTime || '';\n\n  const startTime = allDay\n    ? ''\n    : formatTime(event.start?.dateTime);\n\n  const endTime = allDay\n    ? ''\n    : formatTime(event.end?.dateTime);\n\n  const sortTime = createSortTime(\n    event.start?.dateTime,\n    allDay\n  );\n\n  let displayTime = 'Time not specified';\n\n  if (allDay) {\n    displayTime = 'All Day';\n  } else if (startTime && endTime) {\n    displayTime = `${startTime} – ${endTime}`;\n  } else if (startTime) {\n    displayTime = `Starts at ${startTime}`;\n  }\n\n  return {\n    name: event.summary?.trim() || 'Untitled Event',\n    date: formatDate(rawDate),\n    rawDate,\n    sortTime,\n    startTime,\n    endTime,\n    displayTime,\n    allDay,\n    location: event.location?.trim() || '',\n    description: event.description?.trim() || '',\n    calendar:\n      event.organizer?.displayName ||\n      event.organizer?.email ||\n      'Google Calendar',\n    link: event.htmlLink || '',\n    status: event.status || '',\n    eventId: event.id || '',\n  };\n});\n\n// Sort by date first, then time.\n// All-day events use 00:00 and appear first.\n// Events missing a time use 23:59 and appear last.\nevents.sort((a, b) => {\n  const aDate = (a.rawDate || '').slice(0, 10);\n  const bDate = (b.rawDate || '').slice(0, 10);\n\n  const dateComparison = aDate.localeCompare(bDate);\n\n  if (dateComparison !== 0) {\n    return dateComparison;\n  }\n\n  return a.sortTime.localeCompare(b.sortTime);\n});\n\nreturn [\n  {\n    json: {\n      eventCount: events.length,\n      agendaDate: events[0]?.date || '',\n      timeZone,\n      events,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        0
+      ],
+      "id": "13deb004-8eba-4fec-a3cd-df3890f6fd48",
+      "name": "Build Event Objects"
+    },
+    {
+      "parameters": {
+        "jsCode": "// =========================\n// TEMPLATE SETTINGS\n// =========================\n\nconst THEME = {\n  title: \"📅 Tomorrow's Schedule\",\n\n  primary: \"#2563eb\",\n  success: \"#16a34a\",\n\n  background: \"#f3f4f6\",\n  card: \"#ffffff\",\n  border: \"#e5e7eb\",\n\n  titleColor: \"#111827\",\n  textColor: \"#374151\",\n  mutedColor: \"#6b7280\",\n\n  font: \"Arial, Helvetica, sans-serif\",\n\n  buttonText: \"Open in Google Calendar\",\n\n  footer: \"Powered by Google Calendar + n8n\",\n};\n\nconst data = $input.first().json;\nconst events = data.events ?? [];\nconst agendaDate = data.agendaDate || 'Tomorrow';\n\nfunction escapeHtml(value = '') {\n  return String(value)\n    .replace(/&/g, '&amp;')\n    .replace(/</g, '&lt;')\n    .replace(/>/g, '&gt;')\n    .replace(/\"/g, '&quot;')\n    .replace(/'/g, '&#039;');\n}\n\nconst eventCards = events.length > 0\n  ? events.map((event) => {\n      const location = event.location\n        ? `<div style=\"margin-top:8px;color:${THEME.textColor};\">📍 ${escapeHtml(event.location)}</div>`\n        : '';\n\n      const description = event.description\n        ? `<div style=\"margin-top:8px;color:${THEME.textColor};\">${escapeHtml(event.description)}</div>`\n        : '';\n    const timeBadge = event.startTime\n  ? `\n    <div style=\"\n      display:inline-block;\n      padding:6px 10px;\n      border-radius:999px;\n      background:#dbeafe;\n      color:#1d4ed8;\n      font-size:13px;\n      font-weight:700;\n      margin-bottom:10px;\n    \">\n      ${escapeHtml(event.displayTime)}\n    </div>\n  `\n  : '';\n\n      const calendarLink = event.link\n        ? `\n          <div style=\"\n            margin-top:18px;\n            text-align:center;\n          \">\n            <a\n              href=\"${escapeHtml(event.link)}\"\n              style=\"\n                display:inline-block;\n                padding:10px 14px;\n                background:${THEME.primary};\n                color:#ffffff;\n                text-decoration:none;\n                font-size:14px;\n                font-weight:700;\n                border-radius:8px;\n              \"\n            >\n              ${escapeHtml(THEME.buttonText)}\n            </a>\n          </div>\n        `\n        : '';\n\n      return `\n  <div style=\"\n    margin-bottom:24px;\n    padding:18px;\n    border:1px solid ${THEME.border};\n    border-radius:12px;\n    background:${THEME.card};\n  \">\n    ${timeBadge}\n\n    <div style=\"\n      font-size:18px;\n      font-weight:700;\n      color:${THEME.titleColor};\n    \">\n      ${escapeHtml(event.name)}\n    </div>\n\n    ${location}\n    ${description}\n    ${calendarLink}\n  </div>\n`;\n    }).join('')\n  : `\n    <div style=\"\n      padding:28px 20px;\n      border:1px solid ${THEME.border};\n      border-radius:12px;\n      background:${THEME.card};\n      text-align:center;\n    \">\n      <div style=\"\n        font-size:18px;\n        font-weight:700;\n        color:${THEME.titleColor};\n        margin-bottom:8px;\n      \">\n        No events scheduled\n      </div>\n\n      <div style=\"\n        font-size:14px;\n        color:${THEME.mutedColor};\n      \">\n        Your calendar is clear for tomorrow.\n      </div>\n    </div>\n  `;\n\nconst subject = `${THEME.title.replace('📅 ', '')} - ${agendaDate}`;\n\nconst html = `\n<!DOCTYPE html>\n<html>\n  <body style=\"\n    margin:0;\n    padding:0;\n    background:${THEME.background};\n    font-family:${THEME.font};\n  \">\n    <div style=\"\n      max-width:600px;\n      margin:0 auto;\n      padding:32px 16px;\n    \">\n      <div style=\"\n        background:${THEME.card};\n        border-radius:16px;\n        padding:28px;\n        box-shadow:0 4px 14px rgba(0,0,0,0.06);\n      \">\n        <div style=\"\n          font-size:26px;\n          font-weight:700;\n          color:${THEME.titleColor};\n          margin-bottom:6px;\n        \">\n          ${escapeHtml(THEME.title)}\n        </div>\n\n        <div style=\"\n  font-size:16px;\n  color:${THEME.mutedColor};\n  margin-bottom:6px;\n\">\n  ${escapeHtml(agendaDate)}\n</div>\n\n<div style=\"\n  font-size:14px;\n  color:#9ca3af;\n  margin-bottom:24px;\n\">\n  ${events.length} ${events.length === 1 ? 'event' : 'events'} scheduled\n</div>\n\n        ${eventCards}\n\n        <div style=\"\n          margin-top:24px;\n          padding-top:18px;\n          border-top:1px solid ${THEME.border};\n          font-size:13px;\n          color:#9ca3af;\n          text-align:center;\n        \">\n          ${escapeHtml(THEME.footer)}\n        </div>\n      </div>\n    </div>\n  </body>\n</html>\n`;\n\nreturn [\n  {\n    json: {\n      subject,\n      html,\n      eventCount: events.length,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        0
+      ],
+      "id": "8689cf7f-6764-4949-8ae7-bf9dbf829b00",
+      "name": "Create Email Content"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "81707c73-57e8-44ee-bc67-412a5f9bf721",
+              "name": "Recipient Email",
+              "value": "recipient@example.com",
+              "type": "string"
+            },
+            {
+              "id": "c79b9237-bbe9-4dad-9c83-2adbf1c8b8a9",
+              "name": "Sender Name",
+              "value": "Daily Calendar Reminder",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        848,
+        0
+      ],
+      "id": "dcb6361f-8a99-498b-9606-e37c2ff81fbe",
+      "name": "Workflow Settings"
+    },
+    {
+      "parameters": {
+        "content": "Trigger",
+        "height": 80,
+        "width": 150,
+        "color": "#F2EB21"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        0,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "9f56310c-54d5-457c-8695-97ffd610f52f",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "Retrieve Calendar Data",
+        "height": 80,
+        "width": 150,
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        208,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "1e5d61cf-28f6-4853-9dad-8a188512e271",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "Transform & Normalize Data",
+        "height": 80,
+        "width": 150,
+        "color": 6
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        432,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "b9e15a29-3bfd-4847-a410-3d53086b7954",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "Generate HTML Email",
+        "height": 80,
+        "width": 150,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        640,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "94008f71-5af0-40f0-a48f-60728f7277eb",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "content": "Workflow Configuration",
+        "height": 80,
+        "width": 150
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        848,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "7b31fdff-7b0d-4d05-aed3-06f8439e84cb",
+      "name": "Sticky Note4"
+    },
+    {
+      "parameters": {
+        "content": "Notification Delivery",
+        "height": 80,
+        "width": 150,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1056,
+        -160
+      ],
+      "typeVersion": 1,
+      "id": "b9d4272b-ae2a-4a2a-8b0b-fa9c36a23881",
+      "name": "Sticky Note5"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json[\"Recipient Email\"] }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        0
+      ],
+      "id": "e2312750-01ce-4adb-a62b-3e3c85490e85",
+      "name": "Send Daily Agenda Email"
+     
+    },
+    {
+      "parameters": {
+        "content": "IMPORTANT:\nSet the workflow timezone before activating.\nWorkflow Settings → Timezone"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -320,
+        -32
+      ],
+      "typeVersion": 1,
+      "id": "0b81e2b1-f5bf-4439-9c64-2076c497c98f",
+      "name": "Sticky Note6"
+    },
+    {
+      "parameters": {
+        "content": "SETUP REQUIRED\n\n1. Connect a Google Calendar credential.\n2. Select the calendar to monitor.\n3. Connect a Gmail credential.\n4. Open “Workflow Settings” and enter the recipient email.\n5. Open workflow settings and choose the correct timezone.\n6. Set the desired daily trigger time.\n7. Test the workflow before publishing.",
+        "height": 288,
+        "width": 672
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        192,
+        -576
+      ],
+      "typeVersion": 1,
+      "id": "cefe3376-47c2-41fd-b101-74f88646e3bd",
+      "name": "Sticky Note7"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Reminder Check": {
+      "main": [
+        [
+          {
+            "node": "Get Tomorrow's Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Tomorrow's Events": {
+      "main": [
+        [
+          {
+            "node": "Build Event Objects",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Event Objects": {
+      "main": [
+        [
+          {
+            "node": "Create Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Email Content": {
+      "main": [
+        [
+          {
+            "node": "Workflow Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Settings": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Agenda Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "timezone": "UTC",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "050bde9f-58b6-44d4-b509-b7feed587d75",
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "id": "Bu5r4vbDsneL3t2z",
+  "tags": []
+}
